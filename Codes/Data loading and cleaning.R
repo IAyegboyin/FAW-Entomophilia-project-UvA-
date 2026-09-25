@@ -33,7 +33,7 @@ treat_colors <- c(
 # Load raw data --------------------------------------------------------
 
 raw <- readxl::read_excel(data_path, sheet = "combined treatments")
-view(raw)
+# view(raw) commented out just to see what the data looks like first finally in R
 glimpse(raw)
 
 
@@ -109,22 +109,15 @@ parse_egg_batch <- function(x) {
        flag  = flag)
 }
 
+#  Cleaning variable groups ------------------------------------------------
 
-
-
-
-
-
-#  Clean variable groups ------------------------------------------------
-
-## 4a. Larval weights -- "x" means the larva was already dead at that
-##     weigh-in (per project notes). as.numeric() turns "x" into NA
-##     automatically; we keep an explicit flag for it as well.
+# For larval weight data -- "x" means the larva was already dead at that
+# weigh-in (per project notes). as.numeric() turns "x" into NA
 wt0 <- safe_numeric(raw$wt_day0)
 wt3 <- safe_numeric(raw$wt_day3)
 wt6 <- safe_numeric(raw$wt_day6)
 
-df <- raw %>%
+sf_data <- raw %>%
   mutate(
     died_by_day3 = wt_day3 == "x",
     died_by_day6 = wt_day6 == "x",
@@ -133,8 +126,8 @@ df <- raw %>%
     wt_day6 = wt6$value,  wt_day6_flag = wt6$flag
   )
 
-## 4b. Pupation-check columns, larval death, adult emergence, mating status
-df <- df %>%
+# Pupation-check columns, larval death, adult emergence, mating status
+sf_data <- sf_data %>%
   mutate(
     across(c(pup_day8, pup_day9, pup_day11, pup_day12, pup_day13,
              adult_emergence, larvae_died),
@@ -144,29 +137,27 @@ df <- df %>%
     sex = factor(sex, levels = c("male", "female"))
   )
 
-## 4c. Numeric "days"/"mortality" columns
+# view(sf_data)
+# Numeric "days"/"mortality" columns
 dtp   <- safe_numeric(df$days_to_pupation)
 mday  <- safe_numeric(df$mortality_day)
 demg  <- safe_numeric(df$day_emergence)
 amort <- safe_numeric(df$adult_mortality_dai)
 
-df <- df %>%
+sf_data <- sf_data %>%
   mutate(
     days_to_pupation     = dtp$value,   days_to_pupation_flag     = dtp$flag,
     mortality_day        = mday$value,  mortality_day_flag        = mday$flag,
     day_emergence        = demg$value,  day_emergence_flag        = demg$flag,
     adult_mortality_dai  = amort$value, adult_mortality_dai_flag  = amort$flag
   ) %>%
-  # days_to_pupation == 0 is biologically implausible (can't pupate on the
-  # injection day) -- flag it for manual review rather than dropping it
   mutate(days_to_pupation_flag = days_to_pupation_flag | (days_to_pupation == 0))
-
-## 4d. Egg-batch columns (count + size category at 24h/48h/72h)
+# Egg-batch columns cleaning (count + size category at 24h/48h/72h)
 egg24 <- parse_egg_batch(df$egg_24h)
 egg48 <- parse_egg_batch(df$egg_48h)
 egg72 <- parse_egg_batch(df$egg_72h)
 
-df <- df %>%
+sf_data <- sf_data %>%
   mutate(
     egg_24h_count = egg24$count, egg_24h_size = egg24$size, egg_24h_flag = egg24$flag,
     egg_48h_count = egg48$count, egg_48h_size = egg48$size, egg_48h_flag = egg48$flag,
@@ -174,9 +165,17 @@ df <- df %>%
   )
 
 
+
+
+
+
+
+
+
+
 # ---- 5. Derived life-stage variables ----------------------------------------
 
-df <- df %>%
+sf_data <-sf_data %>%
   mutate(pupated_ever = pup_day13)   # day13 is the final pupation check
 
 survival_funnel <- df %>%
