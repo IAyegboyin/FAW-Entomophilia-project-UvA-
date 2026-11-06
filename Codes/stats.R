@@ -185,3 +185,45 @@ cont_res <- list(
   gr_3_6  = compare_continuous(sf_data, "gr_3_6",  "Growth rate day 3-6 (mg/day)"),
   gr_0_6  = compare_continuous(sf_data, "gr_0_6",  "Growth rate day 0-6 (mg/day)")
 )
+# Repeated-measures mixed model on log weight (treatment by day)
+# random intercepts: individual insect nested in family
+long_w <- sf_data %>%
+  select(insect, insect_family, treatment, wt_day0, wt_day3, wt_day6) %>%
+  pivot_longer(starts_with("wt_day"), names_to = "day", values_to = "wt") %>%
+  mutate(day = factor(parse_number(day)), log_wt = log(wt)) %>%
+  filter(!is.na(wt), wt > 0)
+
+m_wt <- tryCatch(
+  lme4::lmer(log_wt ~ treatment * day + (1 | insect_family) + (1 | insect), data = long_w),
+  error = function(e) NULL)
+
+if (!is.null(m_wt)) {
+  m_wt_anova <- as.data.frame(anova(m_wt)) %>% tibble::rownames_to_column("term")
+  m_wt_contrasts <- as.data.frame(pairs(emmeans(m_wt, ~ treatment | day), adjust = "tukey"))
+  print(m_wt_anova)
+}
+
+# Insect development time ----
+cont_res$days_to_pupation <- compare_continuous(sf_data, "days_to_pupation", "Days to pupation")
+cont_res$day_emergence    <- compare_continuous(sf_data, "day_emergence",    "Day of adult emergence")
+
+# Sex ratio ----
+sex_tab <- sf_data %>% filter(!is.na(sex)) %>% 
+  count(treatment, sex) %>%
+  group_by(treatment) %>% 
+  mutate(pct = 100 * n / sum(n)) %>% 
+  ungroup()
+
+sex_test_overall <- fisher.test(table(sf_data$treatment[!is.na(sf_data$sex)],
+                                      sf_data$sex[!is.na(sf_data$sex)]))
+
+# Is each treatment different from a 1:1 sex ratio?
+sex_binom <- sex_tab %>%
+  group_by(treatment) %>%
+  summarise(n_total = sum(n),
+            n_female = sum(n[sex == "female"]),
+            pct_female = 100 * n_female / n_total,
+            binom_p_vs_50pct = binom.test(n_female, n_total, p = 0.5)$p.value,
+            .groups = "drop")
+
+cat("\nSex ratio ~ treatment (Fisher): p =", signif(sex_test_overall$p.value, 3), "\n")
