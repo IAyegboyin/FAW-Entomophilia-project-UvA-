@@ -95,5 +95,5 @@ sf_data <- sf_data %>%
     egg_48h_count = egg48$count, egg_48h_size = egg48$size, egg_48h_flag = egg48$flag,
     egg_72h_count = egg72$count, egg_72h_size = egg72$size, egg_72h_flag = egg72$flag
   )
-
 view(sf_data)
+
