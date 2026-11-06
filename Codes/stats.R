@@ -48,10 +48,7 @@ chk <- list(
 iwalk(chk, ~ cat(sprintf("%-45s : %s\n", .y,
                          if (length(.x) == 0) "none" else paste(.x, collapse = ", "))))
 
-
-
-# helper functions -----------------------------------------------------
-
+# helper functions ----
 # Compare a CONTINUOUS variable across treatments.
 # Returns: descriptives, normality, Levene, ANOVA, Kruskal-Wallis,
 #          Tukey contrasts, pairwise Wilcoxon (BH), compact letters (Tukey)
@@ -83,7 +80,6 @@ compare_continuous <- function(data, var, label = var) {
     kruskal_chisq = unname(kw$statistic),
     kruskal_p = kw$p.value
   )
-  
   emm    <- emmeans(fit, ~ treatment)
   tukey  <- as.data.frame(pairs(emm, adjust = "tukey")) %>% mutate(variable = label, .before = 1)
   cld_df <- as.data.frame(multcomp::cld(emm, Letters = letters, adjust = "tukey")) %>%
@@ -110,7 +106,6 @@ compare_proportion <- function(data, var, label = var) {
   overall <- tibble(variable = label, test = "Fisher exact (all groups)",
                     p = tryCatch(fisher.test(table(d$treatment, d$y))$p.value,
                                  error = function(e) NA_real_))
-  
   pairs_df <- combn(levels(d$treatment), 2, simplify = FALSE) %>%
     map_dfr(function(p) {
       sub <- d %>% filter(treatment %in% p)
@@ -131,3 +126,62 @@ compare_proportion <- function(data, var, label = var) {
   
   list(desc = desc, overall = overall, pairwise = pairs_df, letters = letters_df)
 }
+
+# Larval survival (Kaplan-Meier, log-rank, Cox) -----
+km_fit <- survfit(Surv(time, event) ~ treatment, data = surv_data)
+print(km_fit)
+
+logrank <- survdiff(Surv(time, event) ~ treatment, data = surv_data)
+logrank_p <- 1 - pchisq(logrank$chisq, df = length(logrank$n) - 1)
+cat("\nLog-rank test across treatments: p =", signif(logrank_p, 3), "\n")
+
+# pairwise log-rank (BH-adjusted)
+pairwise_logrank <- combn(levels(surv_data$treatment), 2, simplify = FALSE) %>%
+  map_dfr(function(p) {
+    sub <- surv_data %>% filter(treatment %in% p) %>% droplevels()
+    sd  <- survdiff(Surv(time, event) ~ treatment, data = sub)
+    tibble(comparison = paste(p, collapse = " vs "),
+           chisq = sd$chisq, p = 1 - pchisq(sd$chisq, df = 1))
+  }) %>%
+  mutate(p_adj_BH = p.adjust(p, method = "BH"))
+
+# Cox proportional hazards: hazard ratio vs PBS
+cox_fit <- coxph(Surv(time, event) ~ treatment, data = surv_data)
+cox_table <- broom::tidy(cox_fit, exponentiate = TRUE, conf.int = TRUE) %>%
+  rename(hazard_ratio = estimate)
+ph_check <- cox.zph(cox_fit)       # proportional-hazards assumption check
+print(ph_check)
+
+# Does starting weight predict death?  (covariate check)
+cox_wt <- coxph(Surv(time, event) ~ treatment + wt_day0, data = surv_data)
+cox_wt_table <- broom::tidy(cox_wt, exponentiate = TRUE, conf.int = TRUE) %>%
+  rename(hazard_ratio = estimate)
+
+# median survival + survival at final check
+km_summary <- summary(km_fit, times = c(3, 6, 9, 13))$table
+km_surv_at <- tibble(
+  treatment = str_remove(summary(km_fit, times = c(3, 6, 9, 13))$strata, "treatment="),
+  day       = summary(km_fit, times = c(3, 6, 9, 13))$time,
+  survival  = summary(km_fit, times = c(3, 6, 9, 13))$surv,
+  lower     = summary(km_fit, times = c(3, 6, 9, 13))$lower,
+  upper     = summary(km_fit, times = c(3, 6, 9, 13))$upper
+)
+# Proportions: larval death, pupation, adult emergence ----
+prop_res <- list(
+  larvae_died     = compare_proportion(sf_data, "larvae_died",     "Larval mortality"),
+  pupated_ever    = compare_proportion(sf_data, "pupated_ever",    "Reached pupation"),
+  adult_emergence = compare_proportion(sf_data, "adult_emergence", "Adult emergence (survival to adulthood)")
+)
+# Emergence among insects that pupated (pupal/adult-stage failure)
+emerg_given_pup <- sf_data %>% filter(pupated_ever %in% TRUE)
+prop_res$emerg_given_pup <- compare_proportion(emerg_given_pup, "adult_emergence",
+                                               "Adult emergence | pupated")
+# Growth -----
+cont_res <- list(
+  wt_day0 = compare_continuous(sf_data, "wt_day0", "Weight day 0 (g)"),
+  wt_day3 = compare_continuous(sf_data, "wt_day3", "Weight day 3 (g)"),
+  wt_day6 = compare_continuous(sf_data, "wt_day6", "Weight day 6 (g)"),
+  gr_0_3  = compare_continuous(sf_data, "gr_0_3",  "Growth rate day 0-3 (mg/day)"),
+  gr_3_6  = compare_continuous(sf_data, "gr_3_6",  "Growth rate day 3-6 (mg/day)"),
+  gr_0_6  = compare_continuous(sf_data, "gr_0_6",  "Growth rate day 0-6 (mg/day)")
+)
